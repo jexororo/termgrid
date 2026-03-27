@@ -12,6 +12,7 @@
     writePty: function (id, data) { return invoke('write_pty', { id: id, data: data }); },
     resizePty: function (id, cols, rows) { return invoke('resize_pty', { id: id, cols: cols, rows: rows }); },
     destroyPty: function (id) { return invoke('destroy_pty', { id: id }); },
+    saveClipboardImage: function (data, ext) { return invoke('save_clipboard_image', { data: data, ext: ext }); },
     onPtyData: function (cb) { listen('pty:data', function (event) { cb(event.payload.id, event.payload.data); }); },
     onPtyExit: function (cb) { listen('pty:exit', function (event) { cb(event.payload.id, event.payload.code); }); },
     minimize: function () { tauriWindow.getCurrentWindow().minimize(); },
@@ -257,6 +258,7 @@
         e.preventDefault();
         var startPos = horizontal ? e.clientX : e.clientY;
         var startRatio = n.ratio;
+        _isResizeDragging = true;
         document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize';
         document.body.style.userSelect = 'none';
 
@@ -266,13 +268,15 @@
           n.ratio = Math.max(0.1, Math.min(0.9, startRatio + (pos - startPos) / size));
           f.style.flex = n.ratio + ' 1 0%';
           s.style.flex = (1 - n.ratio) + ' 1 0%';
-          fitAllTerminals();
+          // ResizeObserver handles visual-only xterm reflow during drag
         }
         function onUp() {
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
+          _isResizeDragging = false;
+          // Now do the real PTY resize for all terminals
           fitAllTerminals();
         }
         document.addEventListener('mousemove', onMove);
@@ -404,36 +408,26 @@
     // Spawn pty process (ONCE)
     termgrid.createPty(pane.paneId, pane.shellType);
 
-    // Resize observer
+    // Resize observer (debounced to prevent ghost/flicker during panel resize)
+    // During resize drag, only reflow xterm visually (skip PTY resize to prevent ghost text)
     pane.resizeObserver = new ResizeObserver(function () {
-      try {
-        fit.fit();
-        termgrid.resizePty(pane.paneId, term.cols, term.rows);
-      } catch (e) { }
+      clearTimeout(pane._resizeTimer);
+      pane._resizeTimer = setTimeout(function () {
+        safeFit(pane, _isResizeDragging);
+      }, _isResizeDragging ? 150 : 80);
     });
     pane.resizeObserver.observe(xtermDiv);
 
     // Drag from label
     setupDragFromLabel(label, pane);
 
-    setTimeout(function () {
-      try {
-        fit.fit();
-        termgrid.resizePty(pane.paneId, term.cols, term.rows);
-      } catch (e) { }
-    }, 100);
+    setTimeout(function () { safeFit(pane); }, 100);
   }
 
   // Attach an already-built pane wrapper into a container (safe to call repeatedly)
   function attachPane(pane, container) {
     if (pane.element) {
       container.appendChild(pane.element);
-      // Refit after reattach
-      setTimeout(function () {
-        try {
-          if (pane.fitAddon) pane.fitAddon.fit();
-        } catch (e) { }
-      }, 50);
     }
   }
 
@@ -450,19 +444,32 @@
     delete panes[paneId];
   }
 
+  // Safe fit - only resize if container has real dimensions (prevents flicker)
+  // When skipPtyResize is true, only reflows xterm visually without telling the PTY
+  function safeFit(pane, skipPtyResize) {
+    if (!pane.fitAddon || !pane.terminal || !pane.element) return;
+    var container = pane.element.querySelector('.xterm-container');
+    if (!container || container.offsetWidth < 50 || container.offsetHeight < 50) return;
+    try {
+      pane.fitAddon.fit();
+      if (!skipPtyResize) {
+        termgrid.resizePty(pane.paneId, pane.terminal.cols, pane.terminal.rows);
+      }
+    } catch (e) { }
+  }
+
+  var _fitTimer = null;
   function fitAllTerminals() {
-    setTimeout(function () {
+    clearTimeout(_fitTimer);
+    _fitTimer = setTimeout(function () {
       Object.keys(panes).forEach(function (id) {
-        var p = panes[id];
-        if (p.fitAddon && p.terminal) {
-          try {
-            p.fitAddon.fit();
-            termgrid.resizePty(id, p.terminal.cols, p.terminal.rows);
-          } catch (e) { }
-        }
+        safeFit(panes[id]);
       });
     }, 50);
   }
+
+  // Track whether a resize drag is in progress (suppress PTY resize during drag)
+  var _isResizeDragging = false;
 
   // ════════════════════════════════════════════════════
   //  DRAG & DROP (move panes between positions)
@@ -605,6 +612,81 @@
     document.body.style.userSelect = '';
     dragState = null;
   }
+
+  // ════════════════════════════════════════════════════
+  //  FILE DRAG-AND-DROP
+  // ════════════════════════════════════════════════════
+
+  // Prevent browser from opening dropped files
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.addEventListener('drop', function (e) { e.preventDefault(); });
+
+  function findPaneAtPosition(x, y) {
+    var elements = document.elementsFromPoint(x, y);
+    for (var i = 0; i < elements.length; i++) {
+      var paneEl = elements[i].closest('.terminal-pane');
+      if (paneEl && paneEl.dataset.paneId) {
+        return paneEl.dataset.paneId;
+      }
+    }
+    return null;
+  }
+
+  // Tauri file drop event - fires when files are dropped onto the window
+  listen('tauri://drag-drop', function (event) {
+    var payload = event.payload;
+    if (!payload) return;
+    var paths = payload.paths || payload;
+    var pos = payload.position;
+    if (!paths || !paths.length) return;
+
+    // Find which pane is under the drop position
+    var targetPaneId = pos ? findPaneAtPosition(pos.x, pos.y) : null;
+    if (!targetPaneId) targetPaneId = activePaneId;
+    if (!targetPaneId || !panes[targetPaneId]) return;
+
+    // Quote paths with spaces, join multiple with space
+    var pathStr = paths.map(function (p) {
+      return p.indexOf(' ') >= 0 ? '"' + p + '"' : p;
+    }).join(' ');
+
+    termgrid.writePty(targetPaneId, pathStr);
+  });
+
+  // ════════════════════════════════════════════════════
+  //  CLIPBOARD IMAGE PASTE
+  // ════════════════════════════════════════════════════
+
+  document.addEventListener('paste', function (e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image/') === 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        var blob = items[i].getAsFile();
+        if (!blob) continue;
+
+        var ext = blob.type.split('/')[1] || 'png';
+        // Convert to base64 and save via backend
+        var reader = new FileReader();
+        reader.onload = function () {
+          var base64 = reader.result.split(',')[1];
+          termgrid.saveClipboardImage(base64, ext).then(function (path) {
+            if (activePaneId && panes[activePaneId]) {
+              var quotedPath = path.indexOf(' ') >= 0 ? '"' + path + '"' : path;
+              termgrid.writePty(activePaneId, quotedPath);
+            }
+          }).catch(function (err) {
+            console.error('Failed to save clipboard image:', err);
+          });
+        };
+        reader.readAsDataURL(blob);
+        break;
+      }
+    }
+  }, true);
 
   // ════════════════════════════════════════════════════
   //  TAB BAR
