@@ -304,7 +304,8 @@
     return pane;
   }
 
-  function mountPane(pane, container) {
+  // Build the wrapper DOM for a pane (once, on first creation)
+  function buildPaneDOM(pane) {
     var wrapper = document.createElement('div');
     wrapper.className = 'terminal-pane';
     wrapper.style.borderColor = pane.color;
@@ -314,17 +315,15 @@
     label.className = 'pane-label';
     label.style.backgroundColor = pane.color;
 
-    // Drag icon
     var dragIcon = document.createElement('span');
     dragIcon.className = 'drag-icon';
-    dragIcon.textContent = '\u2630'; // hamburger icon
+    dragIcon.textContent = '\u2630';
     label.appendChild(dragIcon);
 
     var labelText = document.createElement('span');
     labelText.textContent = pane.name;
     label.appendChild(labelText);
 
-    // Status dot (active / idle / waiting)
     var statusDot = document.createElement('span');
     statusDot.className = 'status-dot idle';
     statusDot.title = 'Idle';
@@ -337,9 +336,8 @@
     var xtermDiv = document.createElement('div');
     xtermDiv.className = 'xterm-container';
 
-    // Drop zones (all 4 edges)
     var zones = ['left', 'right', 'top', 'bottom'];
-    var zoneLabels = { left: '← Left', right: 'Right →', top: '↑ Top', bottom: '↓ Bottom' };
+    var zoneLabels = { left: '\u2190 Left', right: 'Right \u2192', top: '\u2191 Top', bottom: '\u2193 Bottom' };
     zones.forEach(function (side) {
       var zone = document.createElement('div');
       zone.className = 'drop-zone drop-zone-' + side;
@@ -354,10 +352,9 @@
 
     wrapper.appendChild(label);
     wrapper.appendChild(xtermDiv);
-    container.appendChild(wrapper);
     pane.element = wrapper;
 
-    // Create xterm instance
+    // Create xterm instance (ONCE)
     var term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -392,13 +389,6 @@
     pane.terminal = term;
     pane.fitAddon = fit;
 
-    setTimeout(function () {
-      try {
-        fit.fit();
-        termgrid.resizePty(pane.paneId, term.cols, term.rows);
-      } catch (e) { }
-    }, 100);
-
     // Input -> pty
     term.onData(function (data) {
       termgrid.writePty(pane.paneId, data);
@@ -406,13 +396,12 @@
 
     // Focus tracking
     wrapper.addEventListener('mousedown', function (e) {
-      // Don't steal focus from drag operations on label
       if (e.target.closest('.pane-label')) return;
       term.focus();
       setActive(pane.paneId);
     });
 
-    // Spawn pty process
+    // Spawn pty process (ONCE)
     termgrid.createPty(pane.paneId, pane.shellType);
 
     // Resize observer
@@ -424,15 +413,39 @@
     });
     pane.resizeObserver.observe(xtermDiv);
 
-    // ── Drag from label to move pane ──
+    // Drag from label
     setupDragFromLabel(label, pane);
+
+    setTimeout(function () {
+      try {
+        fit.fit();
+        termgrid.resizePty(pane.paneId, term.cols, term.rows);
+      } catch (e) { }
+    }, 100);
+  }
+
+  // Attach an already-built pane wrapper into a container (safe to call repeatedly)
+  function attachPane(pane, container) {
+    if (pane.element) {
+      container.appendChild(pane.element);
+      // Refit after reattach
+      setTimeout(function () {
+        try {
+          if (pane.fitAddon) pane.fitAddon.fit();
+        } catch (e) { }
+      }, 50);
+    }
   }
 
   function disposePane(paneId) {
     var pane = panes[paneId];
     if (!pane) return;
     if (pane.resizeObserver) pane.resizeObserver.disconnect();
+    if (pane.element && pane.element.parentNode) {
+      pane.element.parentNode.removeChild(pane.element);
+    }
     if (pane.terminal) pane.terminal.dispose();
+    clearTimeout(pane._idleTimer);
     termgrid.destroyPty(paneId);
     delete panes[paneId];
   }
@@ -778,13 +791,26 @@
   }
 
   function rerender() {
+    // Detach all pane elements before clearing (preserves xterm instances)
+    Object.keys(panes).forEach(function (id) {
+      var pane = panes[id];
+      if (pane.element && pane.element.parentNode) {
+        pane.element.parentNode.removeChild(pane.element);
+      }
+    });
+
     renderTree(paneContainer);
 
     getAllPaneIds().forEach(function (id) {
       var pane = panes[id];
       var leaf = paneContainer.querySelector('.pane-leaf[data-pane-id="' + id + '"]');
-      if (leaf && pane && !leaf.querySelector('.terminal-pane')) {
-        mountPane(pane, leaf);
+      if (leaf && pane) {
+        if (!pane.element) {
+          // First time - build the DOM and create xterm + pty
+          buildPaneDOM(pane);
+        }
+        // Reattach into the leaf
+        attachPane(pane, leaf);
       }
     });
 
