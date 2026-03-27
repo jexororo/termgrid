@@ -1,6 +1,6 @@
 # TermGrid
 
-A Blender-style tiling terminal multiplexer for Windows. Run multiple CMD and PowerShell sessions in a single window with resizable, color-coded panes and smart auto-naming.
+A tiling terminal multiplexer for Windows. Run multiple CMD and PowerShell sessions in a single window with resizable, color-coded panes and smart auto-naming.
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
@@ -9,11 +9,13 @@ A Blender-style tiling terminal multiplexer for Windows. Run multiple CMD and Po
 
 When working with multiple terminals (dev servers, git, Claude Code, builds), it's hard to tell which window is doing what. TermGrid solves this by putting all your terminals in one window with:
 
-- **Blender-style tiling** - Split horizontally or vertically, drag borders to resize
+- **Tiling layout** - Split horizontally or vertically, drag borders to resize
 - **Color-coded borders** - Instantly identify each terminal at a glance
 - **Smart auto-naming** - Detects what's running (npm, git, docker, Claude Code, etc.)
 - **Activity indicators** - Green = running, gray = idle, orange = waiting for your input
 - **Drag to rearrange** - Grab a pane's header and drop it on any edge of another pane
+- **File drag-and-drop** - Drop files from Explorer onto any pane to paste the path
+- **Clipboard image paste** - Paste screenshots from clipboard, image is saved and path inserted
 - **Tiny footprint** - 8MB portable exe, no install needed
 
 ## Download

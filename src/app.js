@@ -259,6 +259,7 @@
         var startPos = horizontal ? e.clientX : e.clientY;
         var startRatio = n.ratio;
         _isResizeDragging = true;
+        console.log('[RESIZE] mousedown, _isResizeDragging =', _isResizeDragging);
         document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize';
         document.body.style.userSelect = 'none';
 
@@ -268,7 +269,6 @@
           n.ratio = Math.max(0.1, Math.min(0.9, startRatio + (pos - startPos) / size));
           f.style.flex = n.ratio + ' 1 0%';
           s.style.flex = (1 - n.ratio) + ' 1 0%';
-          // ResizeObserver handles visual-only xterm reflow during drag
         }
         function onUp() {
           document.removeEventListener('mousemove', onMove);
@@ -276,7 +276,7 @@
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
           _isResizeDragging = false;
-          // Now do the real PTY resize for all terminals
+          console.log('[RESIZE] mouseup, _isResizeDragging =', _isResizeDragging, '-> calling fitAllTerminals');
           fitAllTerminals();
         }
         document.addEventListener('mousemove', onMove);
@@ -398,6 +398,22 @@
       termgrid.writePty(pane.paneId, data);
     });
 
+    // Custom key handlers for Ctrl+Backspace and Alt+Backspace
+    term.attachCustomKeyEventHandler(function (e) {
+      if (e.type !== 'keydown') return true;
+      if (e.key === 'Backspace' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        // Ctrl+Backspace: send Ctrl+W (delete previous word)
+        termgrid.writePty(pane.paneId, '\x17');
+        return false;
+      }
+      if (e.key === 'Backspace' && e.altKey && !e.ctrlKey && !e.shiftKey) {
+        // Alt+Backspace: send ESC+DEL (delete previous word)
+        termgrid.writePty(pane.paneId, '\x1b\x7f');
+        return false;
+      }
+      return true;
+    });
+
     // Focus tracking
     wrapper.addEventListener('mousedown', function (e) {
       if (e.target.closest('.pane-label')) return;
@@ -408,13 +424,20 @@
     // Spawn pty process (ONCE)
     termgrid.createPty(pane.paneId, pane.shellType);
 
-    // Resize observer (debounced to prevent ghost/flicker during panel resize)
-    // During resize drag, only reflow xterm visually (skip PTY resize to prevent ghost text)
-    pane.resizeObserver = new ResizeObserver(function () {
+    // Resize observer - completely skip during resize drag to prevent ghost text
+    pane.resizeObserver = new ResizeObserver(function (entries) {
+      var entry = entries[0];
+      var w = entry ? Math.round(entry.contentRect.width) : '?';
+      var h = entry ? Math.round(entry.contentRect.height) : '?';
+      if (_isResizeDragging) {
+        console.log('[OBSERVER] skipped (dragging), pane:', pane.paneId.slice(0,8), 'size:', w, 'x', h);
+        return;
+      }
+      console.log('[OBSERVER] firing for pane:', pane.paneId.slice(0,8), 'size:', w, 'x', h);
       clearTimeout(pane._resizeTimer);
       pane._resizeTimer = setTimeout(function () {
-        safeFit(pane, _isResizeDragging);
-      }, _isResizeDragging ? 150 : 80);
+        safeFit(pane);
+      }, 80);
     });
     pane.resizeObserver.observe(xtermDiv);
 
@@ -427,7 +450,13 @@
   // Attach an already-built pane wrapper into a container (safe to call repeatedly)
   function attachPane(pane, container) {
     if (pane.element) {
+      console.log('[ATTACH] pane:', pane.paneId.slice(0,8));
       container.appendChild(pane.element);
+      // Force xterm to fully redraw after DOM reattach to prevent ghost text
+      if (pane.terminal) {
+        console.log('[ATTACH] refreshing xterm for pane:', pane.paneId.slice(0,8));
+        pane.terminal.refresh(0, pane.terminal.rows - 1);
+      }
     }
   }
 
@@ -445,23 +474,65 @@
   }
 
   // Safe fit - only resize if container has real dimensions (prevents flicker)
-  // When skipPtyResize is true, only reflows xterm visually without telling the PTY
-  function safeFit(pane, skipPtyResize) {
+  function safeFit(pane) {
     if (!pane.fitAddon || !pane.terminal || !pane.element) return;
     var container = pane.element.querySelector('.xterm-container');
-    if (!container || container.offsetWidth < 50 || container.offsetHeight < 50) return;
+    if (!container || container.offsetWidth < 50 || container.offsetHeight < 50) {
+      console.log('[SAFEFIT] skipped (too small), pane:', pane.paneId.slice(0,8));
+      return;
+    }
+    var oldCols = pane.terminal.cols, oldRows = pane.terminal.rows;
     try {
-      pane.fitAddon.fit();
-      if (!skipPtyResize) {
-        termgrid.resizePty(pane.paneId, pane.terminal.cols, pane.terminal.rows);
+      // Use proposeDimensions to check new size before applying
+      var dims = pane.fitAddon.proposeDimensions();
+      if (!dims) return;
+      var newCols = dims.cols, newRows = dims.rows;
+      console.log('[SAFEFIT] pane:', pane.paneId.slice(0,8), 'cols:', oldCols, '->', newCols, 'rows:', oldRows, '->', newRows);
+      if (newCols !== oldCols || newRows !== oldRows) {
+        // Gate incoming PTY data during resize to prevent ghost text.
+        // Without this, buffered PTY output arrives between the clear and
+        // the program's SIGWINCH redraw, causing duplicated/ghost content.
+        pane._resizing = true;
+        if (!pane._resizeBuffer) pane._resizeBuffer = [];
+
+        // 1. Apply new dimensions (triggers reflow — ghost text appears in buffer)
+        pane.fitAddon.fit();
+        // 2. Clear visible screen AFTER fit. This wipes the reflowed ghost text.
+        //    The clear goes into xterm's async write queue, but with the buffer
+        //    gate active, no PTY data can sneak in ahead of it.
+        pane.terminal.write('\x1b[2J\x1b[H');
+        // 3. Tell the PTY backend the new size (triggers SIGWINCH)
+        console.log('[SAFEFIT] fit + clear + resizing PTY to', newCols, 'x', newRows);
+        termgrid.resizePty(pane.paneId, newCols, newRows);
+
+        // Flush buffered data after the clear has processed. The clear is
+        // already in xterm's write queue, so flushed data renders on a clean
+        // screen. We MUST flush (not discard) because the buffer contains the
+        // program's fresh SIGWINCH redraw — discarding it leaves a blank screen.
+        clearTimeout(pane._resizeGateTimer);
+        pane._resizeGateTimer = setTimeout(function () {
+          pane._resizing = false;
+          if (pane._resizeBuffer && pane._resizeBuffer.length > 0) {
+            console.log('[SAFEFIT] flushing', pane._resizeBuffer.length, 'buffered chunks');
+            pane._resizeBuffer.forEach(function (chunk) {
+              pane.terminal.write(chunk);
+            });
+          }
+          pane._resizeBuffer = [];
+        }, 150);
+      } else {
+        console.log('[SAFEFIT] no change, skipping PTY resize');
       }
-    } catch (e) { }
+    } catch (e) {
+      console.error('[SAFEFIT] error:', e);
+    }
   }
 
   var _fitTimer = null;
   function fitAllTerminals() {
     clearTimeout(_fitTimer);
     _fitTimer = setTimeout(function () {
+      console.log('[FITALL] fitting all terminals');
       Object.keys(panes).forEach(function (id) {
         safeFit(panes[id]);
       });
@@ -634,6 +705,7 @@
 
   // Tauri file drop event - fires when files are dropped onto the window
   listen('tauri://drag-drop', function (event) {
+    console.log('tauri://drag-drop event:', JSON.stringify(event.payload));
     var payload = event.payload;
     if (!payload) return;
     var paths = payload.paths || payload;
@@ -650,41 +722,58 @@
       return p.indexOf(' ') >= 0 ? '"' + p + '"' : p;
     }).join(' ');
 
+    console.log('Writing dropped paths to pane', targetPaneId, ':', pathStr);
     termgrid.writePty(targetPaneId, pathStr);
+  });
+
+  // Also listen for Tauri v2 drag events for debugging
+  listen('tauri://drag-enter', function (event) {
+    console.log('tauri://drag-enter:', JSON.stringify(event.payload));
   });
 
   // ════════════════════════════════════════════════════
   //  CLIPBOARD IMAGE PASTE
   // ════════════════════════════════════════════════════
 
-  document.addEventListener('paste', function (e) {
-    var items = e.clipboardData && e.clipboardData.items;
-    if (!items) return;
+  // Clipboard image paste - use navigator.clipboard API to read images
+  // The paste event from xterm's textarea has 0 items, so we read clipboard directly
+  window.addEventListener('paste', function (e) {
+    // Only handle if we have an active pane
+    if (!activePaneId || !panes[activePaneId]) return;
 
-    for (var i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image/') === 0) {
-        e.preventDefault();
-        e.stopPropagation();
-        var blob = items[i].getAsFile();
-        if (!blob) continue;
-
-        var ext = blob.type.split('/')[1] || 'png';
-        // Convert to base64 and save via backend
-        var reader = new FileReader();
-        reader.onload = function () {
-          var base64 = reader.result.split(',')[1];
-          termgrid.saveClipboardImage(base64, ext).then(function (path) {
-            if (activePaneId && panes[activePaneId]) {
-              var quotedPath = path.indexOf(' ') >= 0 ? '"' + path + '"' : path;
-              termgrid.writePty(activePaneId, quotedPath);
+    // Try navigator.clipboard API for image data
+    if (navigator.clipboard && navigator.clipboard.read) {
+      navigator.clipboard.read().then(function (clipboardItems) {
+        for (var i = 0; i < clipboardItems.length; i++) {
+          var types = clipboardItems[i].types;
+          for (var j = 0; j < types.length; j++) {
+            if (types[j].indexOf('image/') === 0) {
+              var mimeType = types[j];
+              clipboardItems[i].getType(mimeType).then(function (blob) {
+                var ext = mimeType.split('/')[1] || 'png';
+                console.log('Clipboard image found via navigator.clipboard, ext:', ext);
+                var reader = new FileReader();
+                reader.onload = function () {
+                  var base64 = reader.result.split(',')[1];
+                  termgrid.saveClipboardImage(base64, ext).then(function (path) {
+                    console.log('Clipboard image saved to:', path);
+                    if (activePaneId && panes[activePaneId]) {
+                      var quotedPath = path.indexOf(' ') >= 0 ? '"' + path + '"' : path;
+                      termgrid.writePty(activePaneId, quotedPath);
+                    }
+                  }).catch(function (err) {
+                    console.error('Failed to save clipboard image:', err);
+                  });
+                };
+                reader.readAsDataURL(blob);
+              });
+              return;
             }
-          }).catch(function (err) {
-            console.error('Failed to save clipboard image:', err);
-          });
-        };
-        reader.readAsDataURL(blob);
-        break;
-      }
+          }
+        }
+      }).catch(function (err) {
+        console.log('Clipboard read not available:', err);
+      });
     }
   }, true);
 
@@ -896,10 +985,13 @@
       }
     });
 
-    fitAllTerminals();
+    // Delay fit to let the DOM settle after reattach, preventing ghost text
+    setTimeout(function () {
+      fitAllTerminals();
+    }, 150);
 
     if (activePaneId && panes[activePaneId]) {
-      setTimeout(function () { setActive(activePaneId); }, 100);
+      setTimeout(function () { setActive(activePaneId); }, 200);
     }
   }
 
@@ -1027,6 +1119,14 @@
   termgrid.onPtyData(function (id, data) {
     var pane = panes[id];
     if (!pane || !pane.terminal) return;
+
+    // During resize, buffer PTY data to prevent ghost text artifacts.
+    // Data will be flushed after the resize completes (see safeFit).
+    if (pane._resizing) {
+      pane._resizeBuffer.push(data);
+      return;
+    }
+
     pane.terminal.write(data);
 
     // Activity detection

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use base64::Engine;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -146,6 +147,20 @@ fn destroy_pty(state: tauri::State<'_, AppState>, id: String) -> Result<(), Stri
     Ok(())
 }
 
+#[tauri::command]
+fn save_clipboard_image(data: String, ext: String) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| e.to_string())?;
+    let temp_dir = std::env::temp_dir().join("termgrid");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    let safe_ext = ext.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    let filename = format!("clipboard_{}.{}", uuid::Uuid::new_v4(), if safe_ext.is_empty() { "png".to_string() } else { safe_ext });
+    let path = temp_dir.join(&filename);
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState {
@@ -156,6 +171,7 @@ fn main() {
             write_pty,
             resize_pty,
             destroy_pty,
+            save_clipboard_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TermGrid");
