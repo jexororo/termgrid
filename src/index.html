@@ -14,16 +14,49 @@
   <div id="title-bar">
     <span class="title">TERMGRID</span>
     <div class="window-controls">
+      <button id="btn-help" title="Shortcuts (F1)">?</button>
       <button id="btn-minimize" title="Minimize">&#x2500;</button>
       <button id="btn-maximize" title="Maximize">&#x25A1;</button>
       <button id="btn-close" class="close-btn" title="Close">&#x2715;</button>
     </div>
   </div>
   <div id="tab-bar">
+    <button id="shell-toggle" title="Click to switch default shell">PS</button>
     <button id="add-pane-btn" title="New terminal (Ctrl+Shift+H)">+</button>
   </div>
   <div id="pane-container"></div>
   <div id="context-menu" class="hidden"></div>
+
+  <div id="shortcuts-overlay" class="hidden">
+    <div id="shortcuts-panel">
+      <div class="shortcuts-header">
+        <span>Keyboard Shortcuts</span>
+        <button id="shortcuts-close">&times;</button>
+      </div>
+      <div class="shortcuts-body">
+        <div class="shortcut-section">
+          <h3>Panes</h3>
+          <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd><span>Split horizontal</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd><span>Split vertical</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd><span>Close pane</span></div>
+        </div>
+        <div class="shortcut-section">
+          <h3>Mouse</h3>
+          <div class="shortcut-row"><kbd>Drag</kbd> border<span>Resize panes</span></div>
+          <div class="shortcut-row"><kbd>Drag</kbd> color bar<span>Move pane</span></div>
+          <div class="shortcut-row"><kbd>Right-click</kbd> pane<span>Options menu</span></div>
+          <div class="shortcut-row"><kbd>+</kbd> button<span>New terminal</span></div>
+        </div>
+        <div class="shortcut-section">
+          <h3>Status Dots</h3>
+          <div class="shortcut-row"><span class="dot-demo dot-green"></span><span>Running</span></div>
+          <div class="shortcut-row"><span class="dot-demo dot-gray"></span><span>Idle</span></div>
+          <div class="shortcut-row"><span class="dot-demo dot-orange"></span><span>Needs input</span></div>
+        </div>
+      </div>
+      <div class="shortcuts-footer">Press <kbd>F1</kbd> or <kbd>?</kbd> to toggle</div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

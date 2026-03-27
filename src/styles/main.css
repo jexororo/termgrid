@@ -65,6 +65,16 @@ body {
   color: #c9d1d9;
 }
 
+#btn-help {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+#btn-help:hover {
+  background: #58a6ff33 !important;
+  color: #58a6ff !important;
+}
+
 #title-bar .window-controls .close-btn:hover {
   background: #da3633;
   color: #fff;
@@ -163,6 +173,28 @@ body {
 }
 
 /* Add pane button in tab bar */
+#shell-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  flex-shrink: 0;
+  cursor: pointer;
+  color: #58a6ff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #21262d;
+  margin: 4px 2px 4px 4px;
+}
+
+#shell-toggle:hover {
+  background: #30363d;
+  color: #79c0ff;
+}
+
 #add-pane-btn {
   display: flex;
   align-items: center;
@@ -264,4 +296,130 @@ body {
 .ctx-swatch:hover {
   border-color: #fff;
   transform: scale(1.2);
+}
+
+/* Shortcuts overlay */
+#shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+#shortcuts-overlay.hidden {
+  display: none;
+}
+
+#shortcuts-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  width: 380px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.shortcuts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #21262d;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.shortcuts-header button {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortcuts-header button:hover {
+  background: #21262d;
+  color: #f0f6fc;
+}
+
+.shortcuts-body {
+  padding: 12px 18px 16px;
+}
+
+.shortcut-section {
+  margin-bottom: 14px;
+}
+
+.shortcut-section:last-child {
+  margin-bottom: 0;
+}
+
+.shortcut-section h3 {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8b949e;
+  margin-bottom: 8px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #c9d1d9;
+}
+
+kbd {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #f0f6fc;
+  box-shadow: 0 1px 0 #0d1117;
+}
+
+.shortcuts-footer {
+  padding: 10px 18px;
+  border-top: 1px solid #21262d;
+  font-size: 11px;
+  color: #6e7681;
+  text-align: center;
+}
+
+.dot-demo {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  outline: 3px solid rgba(0,0,0,0.6);
+  display: inline-block;
+}
+
+.dot-green {
+  background: #3bff6f;
+  box-shadow: 0 0 8px rgba(59,255,111,0.9);
+}
+
+.dot-gray {
+  background: #888;
+}
+
+.dot-orange {
+  background: #ff6a00;
+  box-shadow: 0 0 10px rgba(255,106,0,1);
 }

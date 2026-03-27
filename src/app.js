@@ -964,6 +964,15 @@
     if (activePaneId) doSplit(activePaneId, 'h');
   });
 
+  // Shell toggle
+  var shellToggleBtn = document.getElementById('shell-toggle');
+  shellToggleBtn.textContent = currentShellType === 'powershell' ? 'PS' : 'CMD';
+
+  shellToggleBtn.addEventListener('click', function () {
+    currentShellType = currentShellType === 'powershell' ? 'cmd' : 'powershell';
+    shellToggleBtn.textContent = currentShellType === 'powershell' ? 'PS' : 'CMD';
+  });
+
   // Window controls
   document.getElementById('btn-minimize').addEventListener('click', function () {
     termgrid.minimize();
@@ -982,8 +991,32 @@
     resizeTimer = setTimeout(fitAllTerminals, 100);
   });
 
+  // Shortcuts overlay
+  var shortcutsOverlay = document.getElementById('shortcuts-overlay');
+
+  function toggleShortcuts() {
+    shortcutsOverlay.classList.toggle('hidden');
+  }
+
+  document.getElementById('btn-help').addEventListener('click', toggleShortcuts);
+  document.getElementById('shortcuts-close').addEventListener('click', toggleShortcuts);
+  shortcutsOverlay.addEventListener('click', function (e) {
+    if (e.target === shortcutsOverlay) toggleShortcuts();
+  });
+
   // Keyboard shortcuts
   document.addEventListener('keydown', function (e) {
+    // F1 or ? to toggle shortcuts
+    if (e.code === 'F1') {
+      e.preventDefault();
+      toggleShortcuts();
+      return;
+    }
+    // Close overlay on Escape
+    if (e.code === 'Escape' && !shortcutsOverlay.classList.contains('hidden')) {
+      toggleShortcuts();
+      return;
+    }
     if (e.ctrlKey && e.shiftKey && e.code === 'KeyH') {
       e.preventDefault();
       if (activePaneId) doSplit(activePaneId, 'h');
