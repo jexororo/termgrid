@@ -1,0 +1,267 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: 'Segoe UI', sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Title bar */
+#title-bar {
+  height: 32px;
+  background: #010409;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  -webkit-app-region: drag;
+  padding: 0 8px;
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
+}
+
+#title-bar .title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  letter-spacing: 1px;
+}
+
+#title-bar .window-controls {
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+#title-bar .window-controls button {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 16px;
+  width: 36px;
+  height: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+#title-bar .window-controls button:hover {
+  background: #21262d;
+  color: #c9d1d9;
+}
+
+#title-bar .window-controls .close-btn:hover {
+  background: #da3633;
+  color: #fff;
+}
+
+/* Tab bar */
+#tab-bar {
+  height: 36px;
+  background: #010409;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 0 4px;
+}
+
+#tab-bar::-webkit-scrollbar {
+  height: 2px;
+}
+
+#tab-bar::-webkit-scrollbar-thumb {
+  background: #30363d;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #8b949e;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: all 0.15s;
+  min-width: 0;
+}
+
+.tab:hover {
+  color: #c9d1d9;
+  background: #161b22;
+}
+
+.tab.active {
+  color: #f0f6fc;
+  border-bottom-color: #58a6ff;
+  background: #0d1117;
+  border-bottom-width: 3px;
+}
+
+.tab.attention {
+  animation: tab-attention 1.5s ease-in-out infinite;
+}
+
+@keyframes tab-attention {
+  0%, 100% { background: transparent; }
+  50% { background: #f0883e22; }
+}
+
+.tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.tab-close {
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+
+.tab:hover .tab-close {
+  opacity: 0.6;
+}
+
+.tab-close:hover {
+  opacity: 1 !important;
+  background: #30363d;
+}
+
+/* Add pane button in tab bar */
+#add-pane-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  flex-shrink: 0;
+  cursor: pointer;
+  color: #8b949e;
+  font-size: 18px;
+  border: none;
+  background: none;
+}
+
+#add-pane-btn:hover {
+  color: #c9d1d9;
+  background: #161b22;
+}
+
+/* Pane container */
+#pane-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Context menu */
+#context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+#context-menu.hidden {
+  display: none;
+}
+
+.ctx-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 4px;
+  color: #c9d1d9;
+}
+
+.ctx-item:hover {
+  background: #21262d;
+}
+
+.ctx-danger {
+  color: #f85149;
+}
+
+.ctx-danger:hover {
+  background: #da363322;
+}
+
+.ctx-separator {
+  height: 1px;
+  background: #21262d;
+  margin: 4px 8px;
+}
+
+.ctx-color-section {
+  padding: 4px 0;
+}
+
+.ctx-color-label {
+  cursor: default;
+  font-size: 11px;
+  color: #8b949e;
+  padding-bottom: 4px;
+}
+
+.ctx-color-label:hover {
+  background: transparent;
+}
+
+.ctx-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 12px 6px;
+}
+
+.ctx-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.ctx-swatch:hover {
+  border-color: #fff;
+  transform: scale(1.2);
+}

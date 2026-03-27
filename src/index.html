@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TermGrid</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/terminal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+</head>
+<body>
+  <div id="title-bar">
+    <span class="title">TERMGRID</span>
+    <div class="window-controls">
+      <button id="btn-minimize" title="Minimize">&#x2500;</button>
+      <button id="btn-maximize" title="Maximize">&#x25A1;</button>
+      <button id="btn-close" class="close-btn" title="Close">&#x2715;</button>
+    </div>
+  </div>
+  <div id="tab-bar">
+    <button id="add-pane-btn" title="New terminal (Ctrl+Shift+H)">+</button>
+  </div>
+  <div id="pane-container"></div>
+  <div id="context-menu" class="hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
