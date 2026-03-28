@@ -357,77 +357,19 @@
     wrapper.appendChild(xtermDiv);
     pane.element = wrapper;
 
-    // Create xterm instance (ONCE)
-    var term = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
-      // Tell xterm.js we're on Windows ConPTY. This does three things:
-      // 1. Disables reflow (buildNumber < 21376) — ConPTY handles repainting
-      // 2. Uses ConPTY-specific row management on resize
-      // 3. Enables Windows wrapping heuristics
-      windowsPty: { backend: 'conpty', buildNumber: 19045 },
-      theme: {
-        background: '#0d1117',
-        foreground: '#c9d1d9',
-        cursor: '#58a6ff',
-        selectionBackground: '#264f78',
-        black: '#0d1117',
-        red: '#ff7b72',
-        green: '#7ee787',
-        yellow: '#d29922',
-        blue: '#58a6ff',
-        magenta: '#bc8cff',
-        cyan: '#39c5cf',
-        white: '#b1bac4',
-        brightBlack: '#6e7681',
-        brightRed: '#ffa198',
-        brightGreen: '#56d364',
-        brightYellow: '#e3b341',
-        brightBlue: '#79c0ff',
-        brightMagenta: '#d2a8ff',
-        brightCyan: '#56d4dd',
-        brightWhite: '#f0f6fc',
-      },
-    });
-
-    var fit = new FitAddon.FitAddon();
-    term.loadAddon(fit);
-    term.open(xtermDiv);
-    pane.terminal = term;
-    pane.fitAddon = fit;
-
-    // Input -> pty
-    term.onData(function (data) {
-      termgrid.writePty(pane.paneId, data);
-    });
-
-    // Custom key handlers for Ctrl+Backspace and Alt+Backspace
-    term.attachCustomKeyEventHandler(function (e) {
-      if (e.type !== 'keydown') return true;
-      if (e.key === 'Backspace' && e.ctrlKey && !e.shiftKey && !e.altKey) {
-        // Ctrl+Backspace: send Ctrl+W (delete previous word)
-        termgrid.writePty(pane.paneId, '\x17');
-        return false;
-      }
-      if (e.key === 'Backspace' && e.altKey && !e.ctrlKey && !e.shiftKey) {
-        // Alt+Backspace: send ESC+DEL (delete previous word)
-        termgrid.writePty(pane.paneId, '\x1b\x7f');
-        return false;
-      }
-      return true;
-    });
+    // Create xterm + wire input + spawn PTY
+    createTerminal(pane, xtermDiv);
+    termgrid.createPty(pane.paneId, pane.shellType);
 
     // Focus tracking
     wrapper.addEventListener('mousedown', function (e) {
       if (e.target.closest('.pane-label')) return;
-      term.focus();
+      if (pane.terminal) pane.terminal.focus();
       setActive(pane.paneId);
     });
 
-    // Spawn pty process (ONCE)
-    termgrid.createPty(pane.paneId, pane.shellType);
-
+    // On resize: destroy old terminal, create fresh one, resize PTY.
+    // Fresh terminal = zero stale content. Program redraws via SIGWINCH.
     pane.resizeObserver = new ResizeObserver(function () {
       if (_isResizeDragging) return;
       clearTimeout(pane._resizeTimer);
@@ -437,9 +379,7 @@
     });
     pane.resizeObserver.observe(xtermDiv);
 
-    // Drag from label
     setupDragFromLabel(label, pane);
-
     setTimeout(function () { resizePane(pane); }, 100);
   }
 
@@ -460,54 +400,100 @@
     delete panes[paneId];
   }
 
-  // ── Resize: atomic via DEC synchronized output (mode 2026) ──
-  //
-  // The problem: on resize, xterm reflows the buffer, ConPTY repaints,
-  // and the program redraws via SIGWINCH. These happen at different times,
-  // and intermediate states show as ghost/duplicate text.
-  //
-  // The fix: use the terminal's own synchronized output protocol.
-  // \x1b[?2026h tells xterm to BUFFER all rendering.
-  // \x1b[?2026l tells xterm to FLUSH — one atomic paint of the final state.
-  // This is the standard way terminals handle batch screen updates.
+  // ── Terminal theme (shared) ──
+  var TERM_THEME = {
+    background: '#0d1117',
+    foreground: '#c9d1d9',
+    cursor: '#58a6ff',
+    selectionBackground: '#264f78',
+    black: '#0d1117',
+    red: '#ff7b72',
+    green: '#7ee787',
+    yellow: '#d29922',
+    blue: '#58a6ff',
+    magenta: '#bc8cff',
+    cyan: '#39c5cf',
+    white: '#b1bac4',
+    brightBlack: '#6e7681',
+    brightRed: '#ffa198',
+    brightGreen: '#56d364',
+    brightYellow: '#e3b341',
+    brightBlue: '#79c0ff',
+    brightMagenta: '#d2a8ff',
+    brightCyan: '#56d4dd',
+    brightWhite: '#f0f6fc',
+  };
 
-  // ── Resize: buffer PTY data, discard ConPTY's stale repaint ──
+  // Create a fresh xterm Terminal and attach it to a pane.
+  // Can be called multiple times — disposes old terminal first.
+  function createTerminal(pane, xtermDiv) {
+    if (pane.terminal) pane.terminal.dispose();
+
+    var term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
+      theme: TERM_THEME,
+    });
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(xtermDiv);
+    pane.terminal = term;
+    pane.fitAddon = fit;
+
+    term.onData(function (data) {
+      termgrid.writePty(pane.paneId, data);
+    });
+    term.attachCustomKeyEventHandler(function (e) {
+      if (e.type !== 'keydown') return true;
+      if (e.key === 'Backspace' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        termgrid.writePty(pane.paneId, '\x17');
+        return false;
+      }
+      if (e.key === 'Backspace' && e.altKey && !e.ctrlKey && !e.shiftKey) {
+        termgrid.writePty(pane.paneId, '\x1b\x7f');
+        return false;
+      }
+      return true;
+    });
+  }
+
+  // ── Resize: destroy and recreate the terminal ──
   //
-  // What the logs revealed:
-  //   After resize, ConPTY dumps its cached screen at wrong positions (ghost text).
-  //   TUI apps (like Claude Code) then send their own clean redraw wrapped in
-  //   DEC synchronized output markers: \x1b[?2026h ... \x1b[?2026l + content.
+  // xterm.js reflow + ConPTY repaint = ghost text on resize.
+  // No amount of clearing/gating/syncing fully fixes it because
+  // stale content accumulates in xterm's buffer across resizes.
   //
-  // Fix: buffer PTY data for 50ms after resize. If we see \x1b[?2026h in the
-  // buffer, everything before it is ConPTY junk — discard it. For plain shells
-  // (no marker), ConPTY's repaint is correct so we keep it all.
+  // Nuclear fix: on resize, destroy the old Terminal and create a
+  // fresh one at the new dimensions. Zero stale content, zero reflow.
+  // The PTY stays alive. ConPTY repaints into the fresh terminal,
+  // and the program redraws via SIGWINCH.
+  //
+  // Cost: scrollback is lost on resize. The program's SIGWINCH redraw
+  // repopulates the visible screen immediately.
 
   var SYNC_MARKER = '\x1b[?2026h';
 
   function resizePane(pane) {
     if (!pane.fitAddon || !pane.terminal || !pane.element) return;
-    var container = pane.element.querySelector('.xterm-container');
-    if (!container || container.offsetWidth < 50 || container.offsetHeight < 50) return;
+    var xtermDiv = pane.element.querySelector('.xterm-container');
+    if (!xtermDiv || xtermDiv.offsetWidth < 50 || xtermDiv.offsetHeight < 50) return;
 
+    // Check if dimensions actually changed
     var dims = pane.fitAddon.proposeDimensions();
     if (!dims) return;
     var newCols = Math.max(dims.cols, 2), newRows = Math.max(dims.rows, 1);
     if (newCols === pane.terminal.cols && newRows === pane.terminal.rows) return;
 
+    // Destroy old terminal, create fresh one — zero stale content
+    createTerminal(pane, xtermDiv);
     pane.fitAddon.fit();
 
-    // Clear the visible screen. Old content stays in cells after fit() because
-    // reflow is disabled (windowsPty). Without this, each resize layers new
-    // content on top of old, duplicating the init banner etc.
-    // This clear sticks because: reflow won't undo it, and ConPTY junk is
-    // filtered out below so it won't overwrite it either.
-    pane.terminal.write('\x1b[2J\x1b[H');
-
-    // Buffer PTY data so we can filter out ConPTY's stale repaint
+    // Buffer PTY data briefly to filter ConPTY's stale repaint
     pane._resizeBuffer = '';
     pane._resizeBuffering = true;
 
-    termgrid.resizePty(pane.paneId, newCols, newRows);
+    termgrid.resizePty(pane.paneId, pane.terminal.cols, pane.terminal.rows);
 
     clearTimeout(pane._resizeFlushTimer);
     pane._resizeFlushTimer = setTimeout(function () {
@@ -516,7 +502,7 @@
       pane._resizeBuffer = '';
       if (!buf) return;
 
-      // If a TUI app sent sync output, discard ConPTY's junk before it
+      // TUI apps wrap their redraw in \x1b[?2026h — discard ConPTY junk before it
       var idx = buf.indexOf(SYNC_MARKER);
       if (idx > 0) buf = buf.substring(idx);
 
