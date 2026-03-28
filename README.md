@@ -16,6 +16,7 @@ When working with multiple terminals (dev servers, git, Claude Code, builds), it
 - **Drag to rearrange** - Grab a pane's header and drop it on any edge of another pane
 - **File drag-and-drop** - Drop files from Explorer onto any pane to paste the path
 - **Clipboard image paste** - Paste screenshots from clipboard, image is saved and path inserted
+- **Ghost-free resize** - No duplicate text when resizing panels, even with TUI apps like Claude Code
 - **Tiny footprint** - 8MB portable exe, no install needed
 
 ## Download
@@ -89,7 +90,7 @@ Some ideas: session persistence, custom themes, Linux/macOS support, tab reorder
 | Component | Technology |
 |-----------|-----------|
 | Backend | Rust + [portable-pty](https://crates.io/crates/portable-pty) |
-| Frontend | Vanilla JS + [xterm.js](https://xtermjs.org/) |
+| Frontend | Vanilla JS + [xterm.js](https://xtermjs.org/) (bundled locally) |
 | Framework | [Tauri 2](https://tauri.app/) |
 | Output | 8MB exe (uses system WebView2) |
 

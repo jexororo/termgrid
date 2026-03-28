@@ -276,8 +276,7 @@
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
           _isResizeDragging = false;
-          console.log('[RESIZE] mouseup, _isResizeDragging =', _isResizeDragging, '-> calling fitAllTerminals');
-          fitAllTerminals();
+          resizeAllPanes();
         }
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -363,6 +362,11 @@
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
+      // Tell xterm.js we're on Windows ConPTY. This does three things:
+      // 1. Disables reflow (buildNumber < 21376) — ConPTY handles repainting
+      // 2. Uses ConPTY-specific row management on resize
+      // 3. Enables Windows wrapping heuristics
+      windowsPty: { backend: 'conpty', buildNumber: 19045 },
       theme: {
         background: '#0d1117',
         foreground: '#c9d1d9',
@@ -424,19 +428,11 @@
     // Spawn pty process (ONCE)
     termgrid.createPty(pane.paneId, pane.shellType);
 
-    // Resize observer - completely skip during resize drag to prevent ghost text
-    pane.resizeObserver = new ResizeObserver(function (entries) {
-      var entry = entries[0];
-      var w = entry ? Math.round(entry.contentRect.width) : '?';
-      var h = entry ? Math.round(entry.contentRect.height) : '?';
-      if (_isResizeDragging) {
-        console.log('[OBSERVER] skipped (dragging), pane:', pane.paneId.slice(0,8), 'size:', w, 'x', h);
-        return;
-      }
-      console.log('[OBSERVER] firing for pane:', pane.paneId.slice(0,8), 'size:', w, 'x', h);
+    pane.resizeObserver = new ResizeObserver(function () {
+      if (_isResizeDragging) return;
       clearTimeout(pane._resizeTimer);
       pane._resizeTimer = setTimeout(function () {
-        safeFit(pane);
+        resizePane(pane);
       }, 80);
     });
     pane.resizeObserver.observe(xtermDiv);
@@ -444,20 +440,11 @@
     // Drag from label
     setupDragFromLabel(label, pane);
 
-    setTimeout(function () { safeFit(pane); }, 100);
+    setTimeout(function () { resizePane(pane); }, 100);
   }
 
-  // Attach an already-built pane wrapper into a container (safe to call repeatedly)
   function attachPane(pane, container) {
-    if (pane.element) {
-      console.log('[ATTACH] pane:', pane.paneId.slice(0,8));
-      container.appendChild(pane.element);
-      // Force xterm to fully redraw after DOM reattach to prevent ghost text
-      if (pane.terminal) {
-        console.log('[ATTACH] refreshing xterm for pane:', pane.paneId.slice(0,8));
-        pane.terminal.refresh(0, pane.terminal.rows - 1);
-      }
-    }
+    if (pane.element) container.appendChild(pane.element);
   }
 
   function disposePane(paneId) {
@@ -473,73 +460,67 @@
     delete panes[paneId];
   }
 
-  // Safe fit - only resize if container has real dimensions (prevents flicker)
-  function safeFit(pane) {
+  // ── Resize: atomic via DEC synchronized output (mode 2026) ──
+  //
+  // The problem: on resize, xterm reflows the buffer, ConPTY repaints,
+  // and the program redraws via SIGWINCH. These happen at different times,
+  // and intermediate states show as ghost/duplicate text.
+  //
+  // The fix: use the terminal's own synchronized output protocol.
+  // \x1b[?2026h tells xterm to BUFFER all rendering.
+  // \x1b[?2026l tells xterm to FLUSH — one atomic paint of the final state.
+  // This is the standard way terminals handle batch screen updates.
+
+  // ── Resize: buffer PTY data, discard ConPTY's stale repaint ──
+  //
+  // What the logs revealed:
+  //   After resize, ConPTY dumps its cached screen at wrong positions (ghost text).
+  //   TUI apps (like Claude Code) then send their own clean redraw wrapped in
+  //   DEC synchronized output markers: \x1b[?2026h ... \x1b[?2026l + content.
+  //
+  // Fix: buffer PTY data for 50ms after resize. If we see \x1b[?2026h in the
+  // buffer, everything before it is ConPTY junk — discard it. For plain shells
+  // (no marker), ConPTY's repaint is correct so we keep it all.
+
+  var SYNC_MARKER = '\x1b[?2026h';
+
+  function resizePane(pane) {
     if (!pane.fitAddon || !pane.terminal || !pane.element) return;
     var container = pane.element.querySelector('.xterm-container');
-    if (!container || container.offsetWidth < 50 || container.offsetHeight < 50) {
-      console.log('[SAFEFIT] skipped (too small), pane:', pane.paneId.slice(0,8));
-      return;
-    }
-    var oldCols = pane.terminal.cols, oldRows = pane.terminal.rows;
-    try {
-      // Use proposeDimensions to check new size before applying
-      var dims = pane.fitAddon.proposeDimensions();
-      if (!dims) return;
-      var newCols = dims.cols, newRows = dims.rows;
-      console.log('[SAFEFIT] pane:', pane.paneId.slice(0,8), 'cols:', oldCols, '->', newCols, 'rows:', oldRows, '->', newRows);
-      if (newCols !== oldCols || newRows !== oldRows) {
-        // Gate incoming PTY data during resize to prevent ghost text.
-        // Without this, buffered PTY output arrives between the clear and
-        // the program's SIGWINCH redraw, causing duplicated/ghost content.
-        pane._resizing = true;
-        if (!pane._resizeBuffer) pane._resizeBuffer = [];
+    if (!container || container.offsetWidth < 50 || container.offsetHeight < 50) return;
 
-        // 1. Apply new dimensions (triggers reflow — ghost text appears in buffer)
-        pane.fitAddon.fit();
-        // 2. Clear visible screen AFTER fit. This wipes the reflowed ghost text.
-        //    The clear goes into xterm's async write queue, but with the buffer
-        //    gate active, no PTY data can sneak in ahead of it.
-        pane.terminal.write('\x1b[2J\x1b[H');
-        // 3. Tell the PTY backend the new size (triggers SIGWINCH)
-        console.log('[SAFEFIT] fit + clear + resizing PTY to', newCols, 'x', newRows);
-        termgrid.resizePty(pane.paneId, newCols, newRows);
+    var dims = pane.fitAddon.proposeDimensions();
+    if (!dims) return;
+    var newCols = Math.max(dims.cols, 2), newRows = Math.max(dims.rows, 1);
+    if (newCols === pane.terminal.cols && newRows === pane.terminal.rows) return;
 
-        // Flush buffered data after the clear has processed. The clear is
-        // already in xterm's write queue, so flushed data renders on a clean
-        // screen. We MUST flush (not discard) because the buffer contains the
-        // program's fresh SIGWINCH redraw — discarding it leaves a blank screen.
-        clearTimeout(pane._resizeGateTimer);
-        pane._resizeGateTimer = setTimeout(function () {
-          pane._resizing = false;
-          if (pane._resizeBuffer && pane._resizeBuffer.length > 0) {
-            console.log('[SAFEFIT] flushing', pane._resizeBuffer.length, 'buffered chunks');
-            pane._resizeBuffer.forEach(function (chunk) {
-              pane.terminal.write(chunk);
-            });
-          }
-          pane._resizeBuffer = [];
-        }, 150);
-      } else {
-        console.log('[SAFEFIT] no change, skipping PTY resize');
-      }
-    } catch (e) {
-      console.error('[SAFEFIT] error:', e);
-    }
-  }
+    pane.fitAddon.fit();
 
-  var _fitTimer = null;
-  function fitAllTerminals() {
-    clearTimeout(_fitTimer);
-    _fitTimer = setTimeout(function () {
-      console.log('[FITALL] fitting all terminals');
-      Object.keys(panes).forEach(function (id) {
-        safeFit(panes[id]);
-      });
+    // Buffer PTY data so we can filter out ConPTY's stale repaint
+    pane._resizeBuffer = '';
+    pane._resizeBuffering = true;
+
+    termgrid.resizePty(pane.paneId, newCols, newRows);
+
+    clearTimeout(pane._resizeFlushTimer);
+    pane._resizeFlushTimer = setTimeout(function () {
+      pane._resizeBuffering = false;
+      var buf = pane._resizeBuffer;
+      pane._resizeBuffer = '';
+      if (!buf) return;
+
+      // If a TUI app sent sync output, discard ConPTY's junk before it
+      var idx = buf.indexOf(SYNC_MARKER);
+      if (idx > 0) buf = buf.substring(idx);
+
+      pane.terminal.write(buf);
     }, 50);
   }
 
-  // Track whether a resize drag is in progress (suppress PTY resize during drag)
+  function resizeAllPanes() {
+    Object.keys(panes).forEach(function (id) { resizePane(panes[id]); });
+  }
+
   var _isResizeDragging = false;
 
   // ════════════════════════════════════════════════════
@@ -962,7 +943,12 @@
   }
 
   function rerender() {
-    // Detach all pane elements before clearing (preserves xterm instances)
+    // Disconnect observers before detaching — we'll resize once at the end
+    Object.keys(panes).forEach(function (id) {
+      if (panes[id].resizeObserver) panes[id].resizeObserver.disconnect();
+    });
+
+    // Detach all pane elements (preserves xterm instances)
     Object.keys(panes).forEach(function (id) {
       var pane = panes[id];
       if (pane.element && pane.element.parentNode) {
@@ -976,18 +962,19 @@
       var pane = panes[id];
       var leaf = paneContainer.querySelector('.pane-leaf[data-pane-id="' + id + '"]');
       if (leaf && pane) {
-        if (!pane.element) {
-          // First time - build the DOM and create xterm + pty
-          buildPaneDOM(pane);
-        }
-        // Reattach into the leaf
+        if (!pane.element) buildPaneDOM(pane);
         attachPane(pane, leaf);
       }
     });
 
-    // Delay fit to let the DOM settle after reattach, preventing ghost text
+    // Reconnect observers and do a single resize after DOM settles
     setTimeout(function () {
-      fitAllTerminals();
+      Object.keys(panes).forEach(function (id) {
+        var pane = panes[id];
+        var xtermDiv = pane.element && pane.element.querySelector('.xterm-container');
+        if (xtermDiv && pane.resizeObserver) pane.resizeObserver.observe(xtermDiv);
+      });
+      resizeAllPanes();
     }, 150);
 
     if (activePaneId && panes[activePaneId]) {
@@ -1120,10 +1107,9 @@
     var pane = panes[id];
     if (!pane || !pane.terminal) return;
 
-    // During resize, buffer PTY data to prevent ghost text artifacts.
-    // Data will be flushed after the resize completes (see safeFit).
-    if (pane._resizing) {
-      pane._resizeBuffer.push(data);
+    // During resize, buffer data so we can filter ConPTY's stale repaint
+    if (pane._resizeBuffering) {
+      pane._resizeBuffer += data;
       return;
     }
 
@@ -1196,7 +1182,7 @@
   var resizeTimer;
   window.addEventListener('resize', function () {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(fitAllTerminals, 100);
+    resizeTimer = setTimeout(resizeAllPanes, 100);
   });
 
   // Shortcuts overlay
