@@ -496,6 +496,13 @@
 
     pane.fitAddon.fit();
 
+    // Clear the visible screen. Old content stays in cells after fit() because
+    // reflow is disabled (windowsPty). Without this, each resize layers new
+    // content on top of old, duplicating the init banner etc.
+    // This clear sticks because: reflow won't undo it, and ConPTY junk is
+    // filtered out below so it won't overwrite it either.
+    pane.terminal.write('\x1b[2J\x1b[H');
+
     // Buffer PTY data so we can filter out ConPTY's stale repaint
     pane._resizeBuffer = '';
     pane._resizeBuffering = true;
